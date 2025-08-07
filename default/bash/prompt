@@ -19,6 +19,60 @@ function __git_status() {
     fi
 }
 
+function __get_current_path() {
+    # Smart path truncation based on terminal width
+    local term_width=${COLUMNS:-80}
+    local fixed_width=50  # More conservative width estimate for venv + user + git
+    local available_width=$((term_width - fixed_width))
+    
+    # Get current path and replace home with ~
+    local full_path="$(pwd)"
+    local current_path="${full_path/#$HOME/\~}"
+    
+    # More aggressive truncation for narrow terminals
+    if [[ $available_width -lt 20 ]]; then
+        # Very narrow - show only current directory
+        current_path="$(basename "$full_path")"
+    elif [[ ${#current_path} -gt $available_width ]]; then
+        # Always show current directory name
+        local current_dir=$(basename "$full_path")
+        
+        # Calculate space for parent path after reserving space for current dir
+        local current_dir_space=${#current_dir}
+        local parent_available=$((available_width - current_dir_space - 4))  # 4 for "/..."
+        
+        if [[ $parent_available -gt 15 ]]; then
+            # Show root indicator + ... + most relevant end directories
+            local path_root=""
+            if [[ "$current_path" == \~* ]]; then
+                path_root="~"
+                local path_without_root="${current_path:1}"  # Remove ~
+            else
+                path_root=""
+                local path_without_root="$current_path"
+            fi
+            
+            local path_without_current=$(dirname "$path_without_root")
+            local end_length=$((parent_available - ${#path_root} - 4))  # 4 for "/..."
+            local path_end="${path_without_current: -$end_length}"
+            current_path="${path_root}/...${path_end}/${current_dir}"
+        else
+            # Very narrow terminal - show only current directory
+            current_path=".../${current_dir}"
+        fi
+    fi
+    
+    echo "$current_path"
+}
+
+function __get_venv_info() {
+    # Virtual environment indicator
+    if [[ -n "$VIRTUAL_ENV" ]]; then
+        local venv_name=$(basename "$VIRTUAL_ENV")
+        printf "\001\033[38;2;166;227;161m\002(%s) " "$venv_name"  # Green color with proper escaping
+    fi
+}
+
 # Cache variables
 __LAST_THEME=""
 __PROMPT_NEEDS_UPDATE=true
@@ -132,8 +186,9 @@ __update_omarchy_prompt() {
         C_SUBTEXT="\[\033[38;2;${dim_r};${dim_g};${dim_b}m\]"
     fi
     
-    # Build PS1
-    PS1="${C_BLUE}╭─[${C_PURPLE} ${C_TEXT}\u${C_SUBTEXT}@${C_CYAN}\h ${C_BLUE}]─[${C_YELLOW} ${C_TEXT}\w ${C_BLUE}]${C_PURPLE}\$(__git_branch)${C_GREEN}\$(__git_status)${C_RESET}
+    
+    # Build PS1 with dynamic path and venv evaluation
+    PS1="${C_BLUE}╭─[\$(__get_venv_info)${C_PURPLE} ${C_TEXT}\u${C_SUBTEXT}@${C_CYAN}\h ${C_BLUE}]─[${C_YELLOW} ${C_TEXT}\$(__get_current_path) ${C_BLUE}]${C_PURPLE}\$(__git_branch)${C_GREEN}\$(__git_status)${C_RESET}
 ${C_BLUE}╰─${C_CYAN}❯${C_BLUE}❯${C_PURPLE}❯ ${C_RESET}"
 }
 
@@ -147,6 +202,9 @@ if [[ "$PROMPT_COMMAND" ]]; then
 else
     PROMPT_COMMAND="__update_omarchy_prompt"
 fi
+
+# Disable virtual environment prompt modification
+export VIRTUAL_ENV_DISABLE_PROMPT=1
 
 # Build initial prompt
 __update_omarchy_prompt
